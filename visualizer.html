@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pure CSS Audio Visualizer</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --bar-count: 64;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Glassmorphism Control Panel */
+        .controls {
+            position: absolute;
+            top: 40px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(15px);
+            padding: 20px 40px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+
+        h2 {
+            margin-bottom: 15px;
+            font-weight: 300;
+            letter-spacing: 2px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .upload-btn {
+            background: #ee6c4d;
+            color: white;
+            padding: 10px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            display: inline-block;
+            margin-bottom: 15px;
+        }
+
+        .upload-btn:hover {
+            background: #ff8264;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(238, 108, 77, 0.4);
+        }
+
+        audio {
+            width: 100%;
+            height: 40px;
+            border-radius: 20px;
+            outline: none;
+        }
+
+        /* The Pure CSS Visualizer Container */
+        .visualizer-container {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 4px;
+            height: 300px;
+            width: 80vw;
+            /* Creates the wet-floor reflection effect entirely in CSS */
+            -webkit-box-reflect: below 2px linear-gradient(transparent 50%, rgba(255,255,255,0.2));
+        }
+
+        /* 
+           THE MAGIC:
+           Height is set to 100%. 
+           ScaleY is driven dynamically by the --vol CSS variable!
+        */
+        .bar {
+            flex: 1;
+            max-width: 12px;
+            height: 100%;
+            border-radius: 6px 6px 0 0;
+            transform-origin: bottom;
+            
+            /* Background color shifts across the rainbow based on its index (--i) */
+            background: hsl(calc(var(--i) * (360 / var(--bar-count))), 80%, 60%);
+            
+            /* Glowing effect */
+            box-shadow: 0 0 15px hsl(calc(var(--i) * (360 / var(--bar-count))), 80%, 60%, 0.5);
+            
+            /* CSS controls the actual audio-reactive scaling */
+            transform: scaleY(var(--vol, 0.02));
+            
+            /* Smooths out the framerate of the audio data */
+            transition: transform 0.05s linear;
+        }
+
+        /* Fallback CSS animation before music plays */
+        .bar.idle {
+            animation: idlePulse 1.5s infinite ease-in-out alternate;
+            /* Stagger the animation using CSS math */
+            animation-delay: calc(var(--i) * -0.1s);
+        }
+
+        @keyframes idlePulse {
+            0% { transform: scaleY(0.05); }
+            100% { transform: scaleY(0.3); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <h2>🎵 Pure CSS Visualizer</h2>
+        <label for="audio-upload" class="upload-btn">📂 Choose an MP3</label>
+        <input type="file" id="audio-upload" accept="audio/*">
+        <audio id="audio" controls></audio>
+    </div>
+
+    <!-- The DOM container for our CSS bars -->
+    <div class="visualizer-container" id="visualizer"></div>
+
+    <script>
+        const visualizer = document.getElementById('visualizer');
+        const audio = document.getElementById('audio');
+        const fileInput = document.getElementById('audio-upload');
+        const TOTAL_BARS = 64;
+        let bars = [];
+
+        // 1. Generate the HTML divs for the bars
+        for (let i = 0; i < TOTAL_BARS; i++) {
+            const bar = document.createElement('div');
+            bar.classList.add('bar', 'idle');
+            // Pass the index to CSS for coloring and staggering
+            bar.style.setProperty('--i', i);
+            visualizer.appendChild(bar);
+            bars.push(bar);
+        }
+
+        // Web Audio API Variables
+        let audioContext;
+        let analyser;
+        let source;
+
+        // 2. Handle File Upload
+        fileInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                const objectURL = URL.createObjectURL(file);
+                audio.src = objectURL;
+                setupAudio();
+                audio.play();
+            }
+        });
+
+        // 3. Audio Setup & The "CSS Bridge"
+        function setupAudio() {
+            // Remove idle animation once real music loads
+            bars.forEach(bar => bar.classList.remove('idle'));
+
+            if (!audioContext) {
+                // Initialize the Web Audio API
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                
+                // Connect the HTML <audio> element to the analyzer
+                source = audioContext.createMediaElementSource(audio);
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+                
+                // Set sample size (higher = more detailed data)
+                analyser.fftSize = 256; 
+                
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+
+                // 4. The Loop: Send audio data to CSS Variables
+                function renderFrame() {
+                    requestAnimationFrame(renderFrame);
+                    analyser.getByteFrequencyData(dataArray);
+
+                    for (let i = 0; i < TOTAL_BARS; i++) {
+                        // Normalize the audio data from 0-255 to a decimal (0.0 to 1.0)
+                        // We use a small portion of the array to skip the highest pitches
+                        const value = dataArray[i] / 255; 
+                        
+                        // Minimum height so bars don't completely disappear
+                        const scale = Math.max(0.02, value); 
+                        
+                        // PIPELINE TO CSS: We don't draw anything in JS. 
+                        // We just update the --vol CSS variable!
+                        bars[i].style.setProperty('--vol', scale);
+                    }
+                }
+                renderFrame();
+            }
+        }
+
+        // Handle play/pause to restart AudioContext (browser autoplay policy)
+        audio.addEventListener('play', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        });
+    </script>
+</body>
+</html>
